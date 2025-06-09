@@ -1,60 +1,54 @@
-from flask import Flask, request, jsonify, Response
+from flask import Flask, request, Response, send_file
 import time
-import random
 import os
-
 import openai
 
 openai.api_key = os.environ.get('OPENAI_API_KEY')
 
-app = Flask(__name__, static_folder='static', static_url_path='')
+app = Flask(__name__)
 
-def get_lmstudio_inference(text, mode='inflate'):
+def get_onion_layers(text, mode='inflate'):
     if mode == 'inflate':
         prompt = (
-            "请将以下文本分为九层递进，每一层都像当代艺术家在展览开幕式上做阐述一样，"
-            "用极度装腔、学术、抽象、玄乎、诗意、隐喻、复杂难懂的语言写作，且每一层风格、修辞、叙述角度递进不同。"
-            "层层围绕‘身份、假象、剥洋葱、钓鱼、被钓’等主题推进，结尾可极度自嘲或荒谬。"
-            "要求每层有中文序号（如“一、二…”），不可用阿拉伯数字，每层只写一遍序号和内容，禁止英文、禁止Markdown。"
-            "文本内容：“{text}”"
-        ).format(text=text)
-    else:  # deflate
+            "请将以下文本分为九层递进，每一层都像身份错乱、假象与真相交织的当代艺术家，"
+            "用极度装腔、学术、抽象、诗意、隐喻、假照片、钓鱼、剥洋葱、被钓等主题不断递进，"
+            "让内容越来越玄乎、装逼、复杂，结尾极度自嘲或荒谬。"
+            "每层用中文序号（一、二…），不可用阿拉伯数字，每层只写一遍序号和内容，禁止英文、禁止Markdown。"
+            f"文本内容：“{text}”"
+        )
+    else:
         prompt = (
-            "请将以下内容分为九层递进，每一层用最极端通俗、土味、网络、吐槽、讽刺的风格转译，像市井大爷调侃艺术展或生活。"
-            "每层递减，结尾可自嘲、反高潮、网络流行语。"
-            "每层有中文序号（如“一、二…”），每层只写一遍序号和内容，禁止英文、禁止Markdown。"
-            "文本内容：“{text}”"
-        ).format(text=text)
+            "请将以下内容分为九层递进，每层用最通俗、土味、网络、吐槽、讽刺的风格翻译，"
+            "像市井大爷调侃艺术家、假照、钓鱼、剥洋葱这些行为，每层递减，结尾可自嘲、反高潮、网络流行语。"
+            "每层用中文序号（一、二…），每层只写一遍序号和内容，禁止英文、禁止Markdown。"
+            f"文本内容：“{text}”"
+        )
 
     try:
+        import re
         print("[DEBUG] 即将请求 OpenAI API")
         response = openai.ChatCompletion.create(
             model="gpt-4o",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=1800,
-            temperature=0.7,
+            temperature=0.8,
             stream=True
         )
-        import re
         buffer = ""
         for chunk in response:
             delta = chunk['choices'][0]['delta']
             if 'content' in delta:
                 buffer += delta['content']
-                # 尝试分割成行，yield 完整的层
                 lines = re.split(r'[\r\n]+', buffer)
-                # 保留最后一行不完整的部分
                 buffer = lines[-1]
                 for line in lines[:-1]:
                     line = line.strip()
                     if not line:
                         continue
-                    # 过滤掉可能的自我思考句子
                     if re.search(r"(我得理解|用户希望|我要先|需要注意|总结一下)", line):
                         continue
                     print(f"[DEBUG] yield line: {line}")
                     yield line.encode("utf-8")
-        # 最后剩余的内容也输出
         final_line = buffer.strip()
         if final_line and not re.search(r"(我得理解|用户希望|我要先|需要注意|总结一下)", final_line):
             print(f"[DEBUG] yield final line: {final_line}")
@@ -75,7 +69,7 @@ def get_lmstudio_inference(text, mode='inflate'):
 
 @app.route('/')
 def index():
-    return app.send_static_file('index.html')
+    return send_file("index.html")
 
 @app.route('/analyze', methods=['GET', 'POST'])
 def analyze():
@@ -87,7 +81,7 @@ def analyze():
         else:
             text = request.json.get('text', 'Default test text')
         print(f"收到文本：{text}，模式：{mode}")
-        analysis_generator = get_lmstudio_inference(text, mode=mode)
+        analysis_generator = get_onion_layers(text, mode=mode)
         print("开始分析并流式返回结果")
         def generate():
             print("[DEBUG] yield initial message: 正在剥开洋葱......")
@@ -97,7 +91,6 @@ def analyze():
             yield "data: 洋葱已剥开！让我闻一下什么味道！\n\n".encode("utf-8")
             time.sleep(3)
             for line in analysis_generator:
-                # line is bytes already from get_lmstudio_inference
                 decoded_line = line.decode("utf-8")
                 print(f"[DEBUG] yield data: {decoded_line}")
                 yield f"data: {decoded_line}\n\n".encode("utf-8")
@@ -106,7 +99,7 @@ def analyze():
     except Exception as e:
         import traceback
         traceback.print_exc()
-        print("OpenAI调用异常：", e)  # 加这行
+        print("OpenAI调用异常：", e)
         fallback_text = [
             "装腔失败，艺术家流泪下班。",
             "这洋葱又臭又辣，剥了半天没剥出层次感。",
